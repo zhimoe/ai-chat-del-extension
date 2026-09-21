@@ -1,12 +1,37 @@
 (() => {
   "use strict";
 
-  const ITEM_SELECTOR = 'a[data-sidebar-item="true"][href^="/c/"]';
-  const HISTORY_SELECTOR = "#history";
+  const IS_GEMINI = window.location.hostname === "gemini.google.com";
+  const SITE_NAME = IS_GEMINI ? "Gemini" : "ChatGPT";
+  const CHATGPT_ITEM_SELECTOR = 'a[data-sidebar-item="true"][href^="/c/"]';
+  const GEMINI_ITEM_SELECTOR = [
+    'gem-nav-list-item[data-test-id="conversation"]',
+    'div[data-test-id="conversation"]',
+    '.chat-history-list gem-nav-list-item',
+    '.chat-history-list a.mat-mdc-list-item[href^="/app/"]',
+    'a[href^="/app/"]',
+  ].join(", ");
+  const ITEM_SELECTOR = IS_GEMINI ? GEMINI_ITEM_SELECTOR : CHATGPT_ITEM_SELECTOR;
+  const GEMINI_MENU_BUTTON_SELECTOR = [
+    'button[data-test-id="actions-menu-button"]',
+    ".conversation-actions-menu-button",
+    'button[aria-label*="更多选项"]',
+    'button[aria-label*="More options"]',
+  ].join(", ");
+  const GEMINI_DELETE_BUTTON_SELECTOR = 'button[data-test-id="delete-button"]';
+  const GEMINI_CONFIRM_HOST_SELECTOR = [
+    'mat-dialog-container gem-button[data-test-id="confirm-button"]',
+    '.cdk-overlay-pane gem-button[data-test-id="confirm-button"]',
+    'gem-button[data-test-id="confirm-button"]',
+    'mat-dialog-container button[data-test-id="confirm-button"]',
+    '.cdk-overlay-pane button[data-test-id="confirm-button"]',
+  ].join(", ");
   const CHECKBOX_CLASS = "cgpt-bulk-checkbox";
   const SELECTED_CLASS = "cgpt-bulk-selected";
   const TOOLBAR_ID = "cgpt-bulk-toolbar";
   const API_DELAY_MS = 180;
+  const GEMINI_UI_TIMEOUT_MS = 5000;
+  const GEMINI_DELETE_TIMEOUT_MS = 12000;
   const REFRESH_DELAY_MS = 300;
   const WATCHDOG_DELAY_MS = 2000;
 
@@ -23,25 +48,75 @@
     return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
+  function isVisible(element) {
+    if (!element?.isConnected) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+  }
+
+  function clickElement(element) {
+    const eventInit = { bubbles: true, cancelable: true, view: window };
+    element.dispatchEvent(new PointerEvent("pointerdown", eventInit));
+    element.dispatchEvent(new MouseEvent("mousedown", eventInit));
+    element.dispatchEvent(new PointerEvent("pointerup", eventInit));
+    element.dispatchEvent(new MouseEvent("mouseup", eventInit));
+    element.click();
+  }
+
+  async function waitFor(getElement, timeoutMs, description) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const element = getElement();
+      if (element) return element;
+      await sleep(100);
+    }
+    throw new Error(`等待${description}超时`);
+  }
+
   function getConversationId(item) {
-    const href = item.getAttribute("href") || "";
-    const match = href.match(/^\/c\/([^/?#]+)/);
+    const link = item.matches?.("a[href]") ? item : item.querySelector('a[href^="/app/"]');
+    const href = link?.getAttribute("href") || "";
+    const match = href.match(IS_GEMINI ? /^\/app\/([^/?#]+)/ : /^\/c\/([^/?#]+)/);
     return match ? match[1] : "";
   }
 
   function getConversationTitle(item) {
-    const span = item.querySelector('span[dir="auto"]');
-    return (span?.textContent || item.getAttribute("aria-label") || "未命名会话").trim();
+    const title = IS_GEMINI
+      ? item.querySelector(".conversation-title, [data-test-id=\"conversation-title\"], .mat-mdc-list-item-title")
+      : item.querySelector('span[dir="auto"]');
+    const link = item.matches?.("a") ? item : item.querySelector("a");
+    return (
+      title?.textContent ||
+      link?.getAttribute("aria-label") ||
+      item.getAttribute("aria-label") ||
+      "未命名会话"
+    ).trim();
   }
 
   function getHistoryRoot() {
-    return document.querySelector(HISTORY_SELECTOR);
+    if (!IS_GEMINI) return document.querySelector("#history");
+    return (
+      document.querySelector(".chat-history-list") ||
+      document.querySelector('mat-nav-list[gem-sidenav-list][role="navigation"]') ||
+      document.querySelector('mat-nav-list[gem-sidenav-list]') ||
+      document.querySelector("mat-nav-list[role=\"navigation\"]")
+    );
   }
 
   function getItems() {
     const history = getHistoryRoot();
     if (!history) return [];
-    return Array.from(history.querySelectorAll(ITEM_SELECTOR)).filter(getConversationId);
+    const nodes = Array.from(history.querySelectorAll(ITEM_SELECTOR)).map((item) => {
+      if (!IS_GEMINI) return item;
+      return (
+        item.closest('gem-nav-list-item[data-test-id="conversation"]') ||
+        item.closest('[data-test-id="conversation"]') ||
+        item.closest(".conversation-items-container") ||
+        item
+      );
+    });
+    return Array.from(new Set(nodes)).filter(getConversationId);
   }
 
   function getObserveTarget() {
@@ -101,7 +176,7 @@
       cachedAccessToken = data.accessToken || data.access_token || null;
       return cachedAccessToken;
     } catch (e) {
-      console.error("[ChatGPT Bulk Manager] 获取 access token 失败:", e);
+      console.error("[AI Chat Bulk Manager] 获取 access token 失败:", e);
       return null;
     }
   }
@@ -206,6 +281,7 @@
       const cb = item.querySelector(`.${CHECKBOX_CLASS}`);
       if (cb) cb.remove();
       item.classList.remove(SELECTED_CLASS, "cgpt-bulk-item");
+      item.querySelector('a[href^="/app/"]')?.classList.remove("cgpt-bulk-item-link");
     }
   }
 
@@ -222,6 +298,9 @@
       }
 
       item.classList.add("cgpt-bulk-item");
+      if (IS_GEMINI) {
+        item.querySelector('a[href^="/app/"]')?.classList.add("cgpt-bulk-item-link");
+      }
       item.prepend(createCheckbox(item));
       updateItemState(item);
     }
@@ -258,6 +337,7 @@
       toolbar.querySelector("[data-cgpt-delete]").addEventListener("click", deleteSelected);
 
       history.parentElement.insertBefore(toolbar, history);
+      toolbar.dataset.site = IS_GEMINI ? "gemini" : "chatgpt";
     }
 
     const batchButtons = toolbar.querySelectorAll(
@@ -307,6 +387,10 @@
   }
 
   async function deleteConversation(id) {
+    if (IS_GEMINI) {
+      return deleteGeminiConversation(id);
+    }
+
     const deviceId = await getDeviceId();
     const url = `/backend-api/conversation/${encodeURIComponent(id)}`;
 
@@ -351,14 +435,111 @@
     }
   }
 
+  function findVisible(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector)).find(isVisible) || null;
+  }
+
+  function findGeminiDeleteButton() {
+    const byTestId = findVisible(GEMINI_DELETE_BUTTON_SELECTOR);
+    if (byTestId) return byTestId;
+
+    const menuButtons = Array.from(
+      document.querySelectorAll('.cdk-overlay-pane [role="menuitem"], .cdk-overlay-pane button, [role="menu"] button')
+    ).filter(isVisible);
+    return (
+      menuButtons.find((button) => /^(删除|Delete)$/i.test(button.textContent.trim())) ||
+      menuButtons.find((button) =>
+        Boolean(button.querySelector('mat-icon[data-mat-icon-name="delete"], mat-icon[fonticon="delete"]'))
+      ) ||
+      null
+    );
+  }
+
+  function findGeminiConfirmButton() {
+    const hosts = Array.from(document.querySelectorAll(GEMINI_CONFIRM_HOST_SELECTOR)).filter(isVisible);
+    if (hosts.length > 0) {
+      const host = hosts[hosts.length - 1];
+      return host.matches("button") ? host : host.querySelector("button") || host;
+    }
+
+    const dialogButtons = Array.from(
+      document.querySelectorAll('mat-dialog-container button, [role="dialog"] button, .cdk-overlay-pane button')
+    ).filter(isVisible);
+    const exactMatches = dialogButtons.filter((button) => /^(删除|Delete)$/i.test(button.textContent.trim()));
+    return exactMatches[exactMatches.length - 1] || null;
+  }
+
+  function dismissGeminiOverlay() {
+    const cancelButtons = Array.from(
+      document.querySelectorAll(
+        'gem-button[data-test-id="cancel-button"], button[data-test-id="cancel-button"], ' +
+          'mat-dialog-container button, [role="dialog"] button'
+      )
+    ).filter(isVisible);
+    const cancelButton = cancelButtons.find((button) => {
+      const target = button.matches("button") ? button : button.querySelector("button") || button;
+      return button.matches('[data-test-id="cancel-button"]') || /^(取消|Cancel)$/i.test(target.textContent.trim());
+    });
+    if (cancelButton) {
+      const target = cancelButton.matches("button") ? cancelButton : cancelButton.querySelector("button") || cancelButton;
+      clickElement(target);
+      return;
+    }
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        code: "Escape",
+        keyCode: 27,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+  }
+
+  async function deleteGeminiConversation(id) {
+    const item = findItemById(id);
+    if (!item) throw new Error("在侧边栏中找不到该会话");
+
+    try {
+      item.scrollIntoView({ block: "center" });
+      item.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      item.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+
+      const menuButton = await waitFor(
+        () => findVisible(GEMINI_MENU_BUTTON_SELECTOR, item),
+        GEMINI_UI_TIMEOUT_MS,
+        "Gemini 会话菜单"
+      );
+      clickElement(menuButton);
+
+      const deleteButton = await waitFor(findGeminiDeleteButton, GEMINI_UI_TIMEOUT_MS, "Gemini 删除菜单项");
+      clickElement(deleteButton);
+
+      const confirmButton = await waitFor(findGeminiConfirmButton, GEMINI_UI_TIMEOUT_MS, "Gemini 删除确认框");
+      clickElement(confirmButton);
+
+      await waitFor(
+        () => (!item.isConnected || !findItemById(id) ? true : null),
+        GEMINI_DELETE_TIMEOUT_MS,
+        "Gemini 删除完成"
+      );
+    } catch (error) {
+      dismissGeminiOverlay();
+      throw error;
+    }
+  }
+
   async function deleteSelected() {
     if (isDeleting || selectedIds.size === 0) return;
 
-    // 预取 token，拿不到就直接提示
-    const token = await refreshAccessToken();
-    if (!token) {
-      setStatus("无法获取访问令牌，请确认您已登录 ChatGPT", "error");
-      return;
+    if (!IS_GEMINI) {
+      // ChatGPT 的接口删除需要 access token；Gemini 通过网页原生删除流程执行。
+      const token = await refreshAccessToken();
+      if (!token) {
+        setStatus("无法获取访问令牌，请确认您已登录 ChatGPT", "error");
+        return;
+      }
     }
 
     const ids = Array.from(selectedIds);
@@ -367,7 +548,7 @@
       .map((id) => getConversationTitle(findItemById(id) || document.createElement("a")))
       .join("\n");
     const more = ids.length > 5 ? `\n...以及另外 ${ids.length - 5} 个会话` : "";
-    const confirmed = window.confirm(`确定删除选中的 ${ids.length} 个 ChatGPT 会话吗？\n\n${titles}${more}`);
+    const confirmed = window.confirm(`确定删除选中的 ${ids.length} 个 ${SITE_NAME} 会话吗？\n\n${titles}${more}`);
     if (!confirmed) return;
 
     isDeleting = true;
@@ -383,7 +564,10 @@
         await deleteConversation(id);
         successCount += 1;
         selectedIds.delete(id);
-        findItemById(id)?.closest("li")?.remove();
+        if (!IS_GEMINI) {
+          const item = findItemById(id);
+          (item?.closest("li") || item)?.remove();
+        }
       } catch (error) {
         failures.push({ id, error: error.message });
       }
@@ -401,7 +585,7 @@
     }
 
     if (failures.length > 0) {
-      console.warn("[ChatGPT Bulk Manager] 删除失败：", failures);
+      console.warn("[AI Chat Bulk Manager] 删除失败：", failures);
       setStatus(`已删除 ${successCount} 个，失败 ${failures.length} 个。详情见 Console。`, "error");
       return;
     }

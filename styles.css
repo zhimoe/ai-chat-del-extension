@@ -49,13 +49,23 @@
   opacity: 0.8;
 }
 
-a.cgpt-bulk-item {
+.cgpt-bulk-item {
   position: relative;
+}
+
+a.cgpt-bulk-item,
+.cgpt-bulk-item > a[href^="/app/"],
+.cgpt-bulk-item .cgpt-bulk-item-link {
   padding-left: 34px !important;
 }
 
-a.cgpt-bulk-item.cgpt-bulk-selected {
+.cgpt-bulk-item.cgpt-bulk-selected,
+.cgpt-bulk-item.cgpt-bulk-selected > a[href^="/app/"] {
   background: color-mix(in srgb, #10a37f 16%, transparent);
+}
+
+#cgpt-bulk-toolbar[data-site="gemini"] {
+  margin: 4px 8px;
 }
 
 .cgpt-bulk-checkbox {
