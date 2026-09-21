@@ -27,6 +27,7 @@
     '.cdk-overlay-pane button[data-test-id="confirm-button"]',
   ].join(", ");
   const CHECKBOX_CLASS = "cgpt-bulk-checkbox";
+  const CHECKBOX_HITAREA_CLASS = "cgpt-bulk-checkbox-hitarea";
   const SELECTED_CLASS = "cgpt-bulk-selected";
   const TOOLBAR_ID = "cgpt-bulk-toolbar";
   const API_DELAY_MS = 180;
@@ -228,18 +229,29 @@
   }
 
   function createCheckbox(item) {
+    const hitArea = document.createElement("span");
+    hitArea.className = CHECKBOX_HITAREA_CLASS;
+    hitArea.title = "选择会话";
+
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.className = CHECKBOX_CLASS;
     checkbox.title = "选择会话";
 
-    // 只阻止冒泡到 <a> 防止跳转，不 preventDefault，让浏览器立即画出勾选动画
-    checkbox.addEventListener("click", (event) => {
+    // 扩大左侧响应区，但保持 checkbox 的视觉尺寸不变。
+    // 命中透明区域时手动触发 checkbox，并阻止会话链接响应。
+    hitArea.addEventListener("click", (event) => {
       event.stopPropagation();
+      if (event.target === hitArea) {
+        event.preventDefault();
+        checkbox.click();
+      }
     });
 
-    checkbox.addEventListener("mousedown", (event) => {
-      event.stopPropagation();
+    ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach((eventName) => {
+      hitArea.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+      });
     });
 
     // change 在浏览器完成 checkbox 视觉切换后触发，再同步状态和后台 UI
@@ -273,13 +285,16 @@
       }
     });
 
-    return checkbox;
+    hitArea.appendChild(checkbox);
+    return hitArea;
   }
 
   function clearDecorations() {
     for (const item of getItems()) {
       const cb = item.querySelector(`.${CHECKBOX_CLASS}`);
-      if (cb) cb.remove();
+      const hitArea = item.querySelector(`.${CHECKBOX_HITAREA_CLASS}`);
+      if (hitArea) hitArea.remove();
+      else if (cb) cb.remove();
       item.classList.remove(SELECTED_CLASS, "cgpt-bulk-item");
       item.querySelector('a[href^="/app/"]')?.classList.remove("cgpt-bulk-item-link");
     }
