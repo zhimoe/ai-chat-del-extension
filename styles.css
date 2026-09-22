@@ -110,17 +110,31 @@ a.cgpt-bulk-item,
   border-color: #10a37f;
 }
 
-/* 白色对勾 */
-.cgpt-bulk-checkbox:checked::after {
-  content: "";
+/* 使用独立 SVG 绘制对勾，避免宿主页面的伪元素盒模型影响位置。 */
+.cgpt-bulk-checkmark {
   position: absolute;
-  left: 4px;
-  top: 1px;
-  width: 4px;
-  height: 8px;
-  border: solid white;
-  border-width: 0 1.5px 1.5px 0;
-  transform: rotate(45deg);
+  left: 8px;
+  top: 50%;
+  width: 15px;
+  height: 15px;
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.12s ease;
+}
+
+.cgpt-bulk-checkmark path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.cgpt-bulk-checkbox:checked + .cgpt-bulk-checkmark {
+  opacity: 1;
 }
 
 /* Toast 通知 */

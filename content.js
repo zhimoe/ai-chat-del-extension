@@ -238,6 +238,16 @@
     checkbox.className = CHECKBOX_CLASS;
     checkbox.title = "选择会话";
 
+    const checkmark = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    checkmark.classList.add("cgpt-bulk-checkmark");
+    checkmark.setAttribute("viewBox", "0 0 15 15");
+    checkmark.setAttribute("aria-hidden", "true");
+    checkmark.setAttribute("focusable", "false");
+
+    const checkmarkPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    checkmarkPath.setAttribute("d", "M3.25 7.75 6.25 10.5 11.75 4.5");
+    checkmark.appendChild(checkmarkPath);
+
     // 扩大左侧响应区，但保持 checkbox 的视觉尺寸不变。
     // 命中透明区域时手动触发 checkbox，并阻止会话链接响应。
     hitArea.addEventListener("click", (event) => {
@@ -285,7 +295,7 @@
       }
     });
 
-    hitArea.appendChild(checkbox);
+    hitArea.append(checkbox, checkmark);
     return hitArea;
   }
 
