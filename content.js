@@ -3,7 +3,9 @@
 
   const IS_GEMINI = window.location.hostname === "gemini.google.com";
   const SITE_NAME = IS_GEMINI ? "Gemini" : "ChatGPT";
-  const CHATGPT_ITEM_SELECTOR = 'a[data-sidebar-item="true"][href^="/c/"]';
+  const CHATGPT_ROW_SELECTOR =
+    '[data-sidebar-chatgpt-conversation-key^="chatgpt:conversation:"][role="listitem"]';
+  const CHATGPT_LINK_SELECTOR = 'a[data-interactive-row-link="true"][href^="/c/"]';
   const GEMINI_ITEM_SELECTOR = [
     'gem-nav-list-item[data-test-id="conversation"]',
     'div[data-test-id="conversation"]',
@@ -11,7 +13,7 @@
     '.chat-history-list a.mat-mdc-list-item[href^="/app/"]',
     'a[href^="/app/"]',
   ].join(", ");
-  const ITEM_SELECTOR = IS_GEMINI ? GEMINI_ITEM_SELECTOR : CHATGPT_ITEM_SELECTOR;
+  const ITEM_SELECTOR = IS_GEMINI ? GEMINI_ITEM_SELECTOR : CHATGPT_ROW_SELECTOR;
   const GEMINI_MENU_BUTTON_SELECTOR = [
     'button[data-test-id="actions-menu-button"]',
     ".conversation-actions-menu-button",
@@ -76,7 +78,9 @@
   }
 
   function getConversationId(item) {
-    const link = item.matches?.("a[href]") ? item : item.querySelector('a[href^="/app/"]');
+    const link = item.matches?.("a[href]")
+      ? item
+      : item.querySelector(IS_GEMINI ? 'a[href^="/app/"]' : CHATGPT_LINK_SELECTOR);
     const href = link?.getAttribute("href") || "";
     const match = href.match(IS_GEMINI ? /^\/app\/([^/?#]+)/ : /^\/c\/([^/?#]+)/);
     return match ? match[1] : "";
@@ -85,7 +89,7 @@
   function getConversationTitle(item) {
     const title = IS_GEMINI
       ? item.querySelector(".conversation-title, [data-test-id=\"conversation-title\"], .mat-mdc-list-item-title")
-      : item.querySelector('span[dir="auto"]');
+      : item.querySelector('[data-thread-title="true"], span[dir="auto"]');
     const link = item.matches?.("a") ? item : item.querySelector("a");
     return (
       title?.textContent ||
@@ -96,7 +100,13 @@
   }
 
   function getHistoryRoot() {
-    if (!IS_GEMINI) return document.querySelector("#history");
+    if (!IS_GEMINI) {
+      const rows = Array.from(document.querySelectorAll(CHATGPT_ROW_SELECTOR));
+      const row = rows.find(
+        (candidate) => isVisible(candidate) && !candidate.closest('[inert], [aria-hidden="true"]')
+      );
+      return row?.closest('[role="list"]') || null;
+    }
     return (
       document.querySelector(".chat-history-list") ||
       document.querySelector('mat-nav-list[gem-sidenav-list][role="navigation"]') ||
@@ -109,7 +119,7 @@
     const history = getHistoryRoot();
     if (!history) return [];
     const nodes = Array.from(history.querySelectorAll(ITEM_SELECTOR)).map((item) => {
-      if (!IS_GEMINI) return item;
+      if (!IS_GEMINI) return item.querySelector(CHATGPT_LINK_SELECTOR);
       return (
         item.closest('gem-nav-list-item[data-test-id="conversation"]') ||
         item.closest('[data-test-id="conversation"]') ||
@@ -117,10 +127,11 @@
         item
       );
     });
-    return Array.from(new Set(nodes)).filter(getConversationId);
+    return Array.from(new Set(nodes)).filter((item) => item && getConversationId(item));
   }
 
   function getObserveTarget() {
+    if (!IS_GEMINI) return document.body || document.documentElement;
     return getHistoryRoot() || document.body || document.documentElement;
   }
 
@@ -363,6 +374,8 @@
 
       history.parentElement.insertBefore(toolbar, history);
       toolbar.dataset.site = IS_GEMINI ? "gemini" : "chatgpt";
+    } else if (toolbar.parentElement !== history.parentElement || toolbar.nextElementSibling !== history) {
+      history.parentElement.insertBefore(toolbar, history);
     }
 
     const batchButtons = toolbar.querySelectorAll(
@@ -628,9 +641,12 @@
     if (observer) return;
 
     observer = new MutationObserver((mutations) => {
-      if (ignoreMutations || !isBatchMode) return;
+      if (ignoreMutations) return;
 
       let shouldRefresh = false;
+      if (!document.getElementById(TOOLBAR_ID)) {
+        shouldRefresh = true;
+      }
       for (const mutation of mutations) {
         if (mutation.type !== "childList") continue;
         for (const node of mutation.addedNodes) {
@@ -644,7 +660,7 @@
         if (shouldRefresh) break;
       }
 
-      if (shouldRefresh) {
+      if (shouldRefresh && (isBatchMode || !document.getElementById(TOOLBAR_ID))) {
         scheduleRefresh();
       }
     });
@@ -672,9 +688,7 @@
       }
     } finally {
       isRefreshing = false;
-      window.setTimeout(() => {
-        ignoreMutations = false;
-      }, 100);
+      ignoreMutations = false;
       if (observer) {
         observeCurrentTarget();
       }
